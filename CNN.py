@@ -324,7 +324,7 @@ class Conv2D:
                         A_slice = Aprev[vert_start : vert_end , horiz_start : horiz_end , :]
 
                         
-                        result[i , h , w , c] = conv_single( A_slice ,
+                        result[i , h , w , c] = single_conv( A_slice ,
                                                             self.trained_weights[: , : , : , c] , 
                                                             self.trained_bias[: , : , : , c])
 
@@ -709,22 +709,14 @@ class RMS:
     def Learning( self ):
         for index , layer in enumerate(self.network_layers):
             if "trained_weights" in vars(layer).keys():
+                  self.grad_squard_W[index] = self.decay_rate * self.grad_squard_W[index] + (1 - self.decay_rate) * layer.dW * layer.dW
+                  self.grad_squard_b[index] = self.decay_rate * self.grad_squard_b[index] + (1 - self.decay_rate) * layer.db * layer.db
 
-                if type(layer) == Dense:
-                    self.grad_squard_W[index] = self.decay_rate * self.grad_squard_W[index] + (1 - self.decay_rate) * layer.dW * layer.dW
-                    self.grad_squard_b[index] = self.decay_rate * self.grad_squard_b[index] + (1 - self.decay_rate) * layer.db * layer.db
+                  const_W = np.sqrt(self.grad_squard_W[index]) + 0.000001 
+                  const_b = np.sqrt(self.grad_squard_b[index]) + 0.000001 
 
-                    const_W = np.sqrt(self.grad_squard_W[index]) + 0.000001 
-                    const_b = np.sqrt(self.grad_squard_b[index]) + 0.000001 
-
-                    layer.trained_weights -= (self.learning_rate * layer.trained_weights / const_W) * layer.dW  
-                    layer.trained_bias    -= (self.learning_rate * layer.trained_bias / const_b)   * layer.db
-                
-                else:
-                    self.grad_squard_W[index] = self.decay_rate * self.grad_squard_W[index] + (1 - self.decay_rate) * layer.dW * layer.dW
-                    const_W = np.sqrt(self.grad_squard_W[index]) + 0.000001 
-
-                    layer.trained_weights -= (self.learning_rate * layer.trained_weights / const_W ) * layer.dW
+                  layer.trained_weights -= (self.learning_rate * layer.trained_weights / const_W) * layer.dW  
+                  layer.trained_bias    -= (self.learning_rate * layer.trained_bias / const_b)   * layer.db
 
 
 class Adam:
