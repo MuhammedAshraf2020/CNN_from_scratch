@@ -168,10 +168,12 @@ def categorical_crossentropy(y_pred , y_target):
     """    
     # Calculate the cosy of this epoch
     cost = - numpy.mean([numpy.log(y_pred[: , i][y_target[i]] + 0.0000001) for i in range(len(y_target))])
-    # Calculate the drivative of the last layer
-    dA = -1 / (y_pred + 0.0000001) 
-    acc = sum(np.argmax(y_pred , axis = 0) == y_target) / y_target.shape[0] 
-    return cost , dA , acc
+    acc = sum(np.argmax(y_pred , axis = 0) == y_target) / y_target.shape[0]
+    m = y_pred.shape[1]
+    for index in range(m):
+    	y_pred[: , index][y_target[index]] -= 1
+    	    # Calculate the drivative of the last layer 
+    return cost , y_pred , acc
 
 class Input2D:
 
@@ -200,15 +202,13 @@ class Input2D:
         self.input_shape = input_shape # Shape of the input sample.
         self.layer_output_size = input_shape # Shape of the output from the current layer. For an input layer, it is the same as the shape of the input sample.
 
-def conv_single(A_slice , W ):
-    """
-    apply filter in specific slice of image
-    A_slice : image slice of shape ( f , f , n_C)
-    W : weights of shape (f , f , n_C)
-    b : bais of shape b
-    """
-
-    Z  = numpy.sum(numpy.multiply(A_slice , W))
+    
+def single_conv(a_slice_X , W , b):
+        
+       
+    S  = np.multiply(a_slice_X , W)
+    Z  = np.sum(S)
+    Z  = Z + b.astype(float)
     return Z
 
 class Conv2D:
@@ -274,6 +274,11 @@ class Conv2D:
         self.trained_weights = self.initial_weights.copy()
 
         # Size of the input to the layer.
+        
+        self.initial_bias = numpy.zeros((1 , 1 , 1 , self.num_filters ))
+
+        self.trained_bias = self.initial_bias.copy()
+
         self.layer_input_size = self.previous_layer.layer_output_size
 
         # Size of the output from the layer.
@@ -320,7 +325,8 @@ class Conv2D:
 
                         
                         result[i , h , w , c] = conv_single( A_slice ,
-                                                            self.trained_weights[: , : , : , c])
+                                                            self.trained_weights[: , : , : , c] , 
+                                                            self.trained_bias[: , : , : , c])
 
         self.Z = result
         if self.activation is not None: # Saving the SOP in the convolution layer feature map.
@@ -355,7 +361,8 @@ class Conv2D:
          # initial gradiants of W , b and A previous
         self.stride = 1
         self.dW = numpy.zeros((f , f , n_CPrev , n_C ))
-        dAprev  = numpy.zeros((m , n_HPrev , n_WPrev , n_C))
+        self.db = numpy.zeros((1 , 1 , 1 ,n_C))
+        dAprev  = numpy.zeros((m , n_HPrev , n_WPrev , n_CPrev))
         
         for i in range(m):                          
             A  = self.input2D[i] 
@@ -376,6 +383,7 @@ class Conv2D:
                         da[vert_start:vert_end, horiz_start:horiz_end, :] += W[:,:,:,c] * dZ[i, h, w, c]
                         
                         self.dW[:,:,:,c] += a_slice * dZ[i, h, w, c]
+                        self.db[:,:,:,c] += dZ[i , h , w , c]
             dAprev[i , : , : , :] = da[: , : , : ]
 
         return dAprev
@@ -621,19 +629,20 @@ class Dense:
 
                 
         self.layer_output = self.activation(self.Z)
-    def dense_layer_back(self , dA):
+    def dense_layer_back(self , dA , Last = False):
         """
         back prop of dense layer 
         dA : the gradient of the next laye
         """
         # dZ = dA * gdash(Z)
-
-        if self.activation is relu:
-            dZ = relu_backward(dA  , self.Z)
+        if Last == True :
+        	dZ = dA
+        elif self.activation is relu:
+            dZ = relu_backward(dA  , self.layer_output)
         elif self.activation == sigmoid:
-            dZ = sigmoid_backward(dA , self.Z)
+            dZ = sigmoid_backward(dA , self.layer_output)
         else:
-            dZ = soft_backward(dA , self.Z)
+            dZ = soft_backward(dA , self.layer_output)
         # The number of samples 
         m  = self.layer_input_size[1]
         # Calculate the gradints
@@ -745,28 +754,19 @@ class Adam:
         for index , layer in enumerate(self.network_layers):
             if "trained_weights" in vars(layer).keys():
 
-                if type(layer) == Dense:
-                    self.FirstMW[index]  = self.beta1 * self.FirstMW[index]  + (1 - self.beta1) * layer.dW 
-                    self.SecondMW[index] = self.beta2 * self.SecondMW[index] + (1 - self.beta1) * layer.dW  * layer.dW
+                self.FirstMW[index]  = self.beta1 * self.FirstMW[index]  + (1 - self.beta1) * layer.dW 
+                self.SecondMW[index] = self.beta2 * self.SecondMW[index] + (1 - self.beta1) * layer.dW  * layer.dW
 
-                    const_W = np.sqrt(self.SecondMW[index]) + 0.000001
+                const_W = np.sqrt(self.SecondMW[index]) + 0.000001
 
-                    self.FirstMb[index]  = self.beta1 * self.FirstMb[index]  + (1 - self.beta1) * layer.db 
-                    self.SecondMb[index] = self.beta2 * self.SecondMb[index] + (1 - self.beta1) * layer.db  * layer.db
+                self.FirstMb[index]  = self.beta1 * self.FirstMb[index]  + (1 - self.beta1) * layer.db 
+                self.SecondMb[index] = self.beta2 * self.SecondMb[index] + (1 - self.beta1) * layer.db  * layer.db
                     
-                    const_b = np.sqrt(self.SecondMb[index]) + 0.000001 
+                const_b = np.sqrt(self.SecondMb[index]) + 0.000001 
 
-                    layer.trained_weights -= (self.learning_rate *  self.FirstMW[index] / const_W )  * layer.dW
-                    layer.trained_bias    -= (self.learning_rate *  self.FirstMb[index] / const_b )  * layer.db
-                
-                else:
-                    self.FirstMW[index]  = self.beta1 * self.FirstMW[index]  + (1 - self.beta1) * layer.dW 
-                    self.SecondMW[index] = self.beta2 * self.SecondMW[index] + (1 - self.beta1) * layer.dW  * layer.dW
-
-                    const_W = np.sqrt(self.SecondMW[index]) + 0.000001
-
-                    layer.trained_weights -= (self.learning_rate *  self.FirstMW[index] / const_W ) * layer.dW
-
+                layer.trained_weights -= (self.learning_rate *  self.FirstMW[index] / const_W )  * layer.dW
+                layer.trained_bias    -= (self.learning_rate *  self.FirstMb[index] / const_b )  * layer.db
+               
 
 
 
@@ -914,10 +914,10 @@ class Model:
                 predicted_label = self.feed_sample(X_batch)
                 y_batch = train_outputs[first_index : second_index]
                 
-                cost , dA , acc = categorical_crossentropy(predicted_label , y_batch)
+                cost , dZ , acc = categorical_crossentropy(predicted_label , y_batch)
                 costlist.append(cost)
                 acclist.append(acc)
-                self.feed_back(dA)
+                self.feed_back(dZ)
                 self.update_method.Learning()
             cost = numpy.mean(costlist)
             acc  = numpy.mean(acclist )
@@ -955,14 +955,15 @@ class Model:
             last_layer_outputs = layer.layer_output
         return self.network_layers[-1].layer_output
     
-    def feed_back(self , dA):
-        last_layer_derivative = dA
+    def feed_back(self , dZ):
+        last_layer_derivative = dZ
+        Last = True
         for layer in range(1 , len(self.network_layers) +1):
             layer = self.network_layers[-layer]
             if type(layer) is Conv2D:
                 last_layer_derivative = layer.conv_back(dA = last_layer_derivative)
             elif type(layer) is Dense:
-                last_layer_derivative = layer.dense_layer_back(dA = last_layer_derivative)
+                last_layer_derivative = layer.dense_layer_back(dA = last_layer_derivative , Last = Last)
             elif type(layer) is MaxPooling2D:
                 last_layer_derivative = layer.max_pooling_back(dA = last_layer_derivative)
             elif type(layer) is Flatten:
@@ -972,6 +973,7 @@ class Model:
             else:
                 print("Other")
                 raise TypeError("The layer of type {layer_type} is not supported yet.".format(layer_type=type(layer)))
+            Last = False
 
      
     def update_weights(self , C = 0):
@@ -987,9 +989,7 @@ class Model:
         for layer in self.network_layers:
             if "trained_weights" in vars(layer).keys():
                 layer.trained_weights = layer.trained_weights - self.learning_rate * layer.dW # here you have to add derivative
-
-                if type(layer) == Dense:
-                    layer.trained_bias    = layer.trained_bias    - self.learning_rate * layer.db
+                layer.trained_bias    = layer.trained_bias    - self.learning_rate * layer.db
 
     def predict(self, data_inputs):
 
